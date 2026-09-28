@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Prédiction d'attrition — Démo</title>
+<style>
+  :root {
+    --ink: #0A0D12;
+    --surface: #11161D;
+    --paper: #EDF1F7;
+    --muted: #8D98AC;
+    --dim: #56616F;
+    --accent: #2DD4A7;
+    --accent2: #7C6CFF;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ink);
+    color: var(--paper);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    padding: 48px 24px;
+  }
+  main { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 28px; margin-bottom: 8px; }
+  p.sub { color: var(--muted); margin-top: 0; margin-bottom: 32px; font-size: 14px; }
+  form { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  label { display: flex; flex-direction: column; gap: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); }
+  input, select {
+    background: var(--surface);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: var(--paper);
+    padding: 10px 12px;
+    font-family: inherit;
+    font-size: 14px;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  button {
+    grid-column: 1 / -1;
+    background: var(--accent);
+    color: var(--ink);
+    border: none;
+    padding: 14px;
+    font-family: inherit;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    margin-top: 8px;
+  }
+  button:hover { opacity: 0.9; }
+  #result {
+    margin-top: 32px;
+    padding: 24px;
+    border: 1px solid rgba(255,255,255,0.1);
+    display: none;
+  }
+  #result.show { display: block; }
+  #result .prob { font-size: 40px; font-weight: 700; }
+  #result .label { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .risk-high { color: #F2637B; }
+  .risk-low { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Prédiction d'attrition</h1>
+  <p class="sub">Démo de l'API de prédiction — modèle entraîné sur le jeu de données IBM HR Analytics.</p>
+
+  <form id="predict-form">
+    <label>Âge <input type="number" name="Age" value="29" required /></label>
+    <label>Département
+      <select name="Department">
+        <option>Research & Development</option>
+        <option>Sales</option>
+        <option>Human Resources</option>
+      </select>
+    </label>
+    <label>Poste <input type="text" name="JobRole" value="Laboratory Technician" required /></label>
+    <label>Heures supplémentaires
+      <select name="OverTime"><option>Yes</option><option>No</option></select>
+    </label>
+    <label>Déplacements
+      <select name="BusinessTravel">
+        <option>Travel_Rarely</option>
+        <option>Travel_Frequently</option>
+        <option>Non-Travel</option>
+      </select>
+    </label>
+    <label>Statut marital
+      <select name="MaritalStatus"><option>Single</option><option>Married</option><option>Divorced</option></select>
+    </label>
+    <label>Genre <select name="Gender"><option>Female</option><option>Male</option></select></label>
+    <label>Domaine d'études
+      <select name="EducationField">
+        <option>Life Sciences</option><option>Medical</option><option>Marketing</option>
+        <option>Technical Degree</option><option>Human Resources</option><option>Other</option>
+      </select>
+    </label>
+    <label>Salaire mensuel <input type="number" name="MonthlyIncome" value="2800" required /></label>
+    <label>Distance domicile (km) <input type="number" name="DistanceFromHome" value="8" required /></label>
+    <label>Années dans l'entreprise <input type="number" name="YearsAtCompany" value="3" required /></label>
+    <label>Années avec le manager actuel <input type="number" name="YearsWithCurrManager" value="2" required /></label>
+    <label>Satisfaction au travail (1-4) <input type="number" min="1" max="4" name="JobSatisfaction" value="2" required /></label>
+    <label>Équilibre vie pro/perso (1-4) <input type="number" min="1" max="4" name="WorkLifeBalance" value="2" required /></label>
+    <label>Nombre d'entreprises précédentes <input type="number" name="NumCompaniesWorked" value="2" required /></label>
+    <label>Niveau hiérarchique (1-5) <input type="number" min="1" max="5" name="JobLevel" value="1" required /></label>
+
+    <button type="submit">Prédire le risque d'attrition</button>
+  </form>
+
+  <div id="result">
+    <div class="prob" id="prob-value">—</div>
+    <div class="label" id="prob-label"></div>
+  </div>
+</main>
+
+<script>
+  // Le formulaire est servi par la même API FastAPI (StaticFiles) : appel en relatif.
+  const API_URL = window.API_URL || "";
+
+  // Valeurs par défaut pour les champs non exposés dans ce formulaire simplifié.
+  const DEFAULTS = {
+    DailyRate: 800, Education: 3, EnvironmentSatisfaction: 3, HourlyRate: 65,
+    JobInvolvement: 3, MonthlyRate: 15000, PercentSalaryHike: 13, PerformanceRating: 3,
+    RelationshipSatisfaction: 3, StockOptionLevel: 0, TotalWorkingYears: 5,
+    TrainingTimesLastYear: 2, YearsInCurrentRole: 2, YearsSinceLastPromotion: 0,
+  };
+
+  document.getElementById("predict-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const formData = Object.fromEntries(new FormData(e.target).entries());
+
+    const numericFields = [
+      "Age", "MonthlyIncome", "DistanceFromHome", "YearsAtCompany", "YearsWithCurrManager",
+      "JobSatisfaction", "WorkLifeBalance", "NumCompaniesWorked", "JobLevel",
+    ];
+    numericFields.forEach((f) => { formData[f] = Number(formData[f]); });
+
+    const payload = { ...DEFAULTS, ...formData };
+
+    const resultBox = document.getElementById("result");
+    const probValue = document.getElementById("prob-value");
+    const probLabel = document.getElementById("prob-label");
+
+    try {
+      const res = await fetch(`${API_URL}/api/predict`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+
+      const pct = Math.round(data.attrition_probability * 100);
+      probValue.textContent = `${pct}%`;
+      probValue.className = "prob " + (data.attrition_predite ? "risk-high" : "risk-low");
+      probLabel.textContent = data.attrition_predite
+        ? "Risque de départ élevé"
+        : "Risque de départ faible";
+      resultBox.classList.add("show");
+    } catch (err) {
+      probValue.textContent = "Erreur";
+      probValue.className = "prob risk-high";
+      probLabel.textContent = String(err);
+      resultBox.classList.add("show");
+    }
+  });
+</script>
+</body>
+</html>
